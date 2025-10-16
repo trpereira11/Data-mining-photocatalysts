@@ -1,0 +1,95 @@
+## Drive Mounting and Imports
+# Import necessary libraries.
+from google.colab import drive
+import os
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
+import subprocess
+
+# Mounts Google Drive to access files.
+drive.mount('/content/drive') 
+
+
+# --- Configuration and Data Collection ---
+
+# Input path for Excel/XLS files containing DOIs.
+caminho_da_pasta = '/content/drive/MyDrive/DOI'
+# Output path for the downloaded articles (PDFs).
+caminho_saida = '/content/drive/MyDrive/Artigos-02/'
+
+# Install PyPaperBot and required packages.
+!pip install PyPaperBot undetected-chromedriver openpyxl
+
+# List to store all collected DOIs.
+todos_os_dois = [] 
+
+# Loop through files in the input folder.
+for nome_do_arquivo in os.listdir(caminho_da_pasta):
+    # Process only Excel files.
+    if nome_do_arquivo.endswith('.xls') or nome_do_arquivo.endswith('.xlsx'):
+        caminho_completo = os.path.join(caminho_da_pasta, nome_do_arquivo)
+        try:
+            # Read the Excel file.
+            df = pd.read_excel(caminho_completo)
+            # Extract and clean the 'DOI' column.
+            dois = df['DOI'].dropna().tolist()
+            # Append DOIs to the master list.
+            todos_os_dois.extend(dois)
+            print(f'DOIs lidos de: {nome_do_arquivo}')
+        except Exception as e:
+            print(f'Erro ao ler o arquivo {nome_do_arquivo}: {e}')
+
+# Total DOIs found.
+print(f'\n{len(todos_os_dois)} DOIs encontrados no total.')
+
+print("\nIniciando download paralelo com PyPaperBot...")
+
+# --- Parallel Download Function ---
+
+def baixar_dois(lista_dois, indice_thread):
+    """Downloads a chunk of DOIs using PyPaperBot."""
+    if not lista_dois:
+        print(f"Thread {indice_thread}: Nenhuma DOI para baixar.")
+        return
+
+    # Create a temporary file for PyPaperBot input.
+    nome_arquivo_temp = f'dois_temp_{indice_thread}.txt'
+    with open(nome_arquivo_temp, 'w') as f:
+        for doi in lista_dois:
+            f.write(f'{doi}\n')
+
+    # Construct the PyPaperBot execution command.
+    comando = [
+        'python', '-m', 'PyPaperBot',
+        '--doi-file', nome_arquivo_temp, # Input DOI file.
+        '--dwn-dir', caminho_saida,    # Output directory.
+        '--scihub-mirror', 'https://sci-hub.se', # Sci-Hub mirror.
+    ]
+
+    try:
+        print(f"Thread {indice_thread}: Baixando {len(lista_dois)} artigos...")
+        # Execute the PyPaperBot command.
+        subprocess.run(comando, check=True, text=True, capture_output=True)
+        print(f"Thread {indice_thread}: Processo de download concluído.")
+    except subprocess.CalledProcessError as e:
+        # Handle execution errors.
+        print(f"Thread {indice_thread}: Erro ao executar o PyPaperBot: {e.stderr}")
+    finally:
+        # Clean up: delete the temporary DOI file.
+        if os.path.exists(nome_arquivo_temp):
+            os.remove(nome_arquivo_temp)
+
+# --- Threading Setup ---
+
+num_threads = 10 # Number of concurrent threads.
+# Calculate chunk size for even distribution.
+tamanho_chunk = (len(todos_os_dois) + num_threads - 1) // num_threads
+# Split the master list into chunks.
+lista_chunks = [todos_os_dois[i:i + tamanho_chunk] for i in range(0, len(todos_os_dois), tamanho_chunk)]
+
+# Use ThreadPoolExecutor to run the download function in parallel.
+with ThreadPoolExecutor(max_workers=num_threads) as executor:
+    # Map the download function across all chunks and indices.
+    executor.map(baixar_dois, lista_chunks, range(len(lista_chunks)))
+
+print("\nProcesso de download paralelo finalizado.")
