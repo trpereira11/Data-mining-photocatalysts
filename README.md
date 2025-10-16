@@ -1,2 +1,4 @@
-# Data-mining-photocatalysts
-Data mining for optimization of photocatalysts for hydrogen production
+## importando drive e as bibliotecas nescessarias ##
+from google.colab import drive
+drive.mount('/content/drive')
+import os
